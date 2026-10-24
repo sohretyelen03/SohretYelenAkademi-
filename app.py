@@ -435,3 +435,74 @@ else:
                         st.error(f"Soru eklenirken hata oluştu: {e}")
                 else:
                     st.warning("Lütfen Konu, Soru Metni ve Doğru Cevap alanlarını eksiksiz doldurun.")
+tab1, tab2, tab3, tab4 = st.tabs(
+    [
+        "⚠️ Takılınan Konular & Otomatik Ödevlendirme",
+        "🌐 Sınıf Düzeyi Knowledge Graph",
+        "➕ Yeni Soru / Flashcard Ekle",
+        "📚 Soru Deposu",  # <-- Yeni sekme burada tanımlanıyor
+    ]
+)
+# --- 4. SEKME: Soru Deposu ve Görüntüleme ---
+with tab4:
+  st.subheader("📚 Veritabanındaki Kayıtlı Soru Bankası")
+  st.markdown(
+      "Burada sisteme eklediğiniz tüm soruları görebilir, ders ve sınıf"
+      " düzeyine göre inceleyebilirsiniz."
+  )
+
+  try:
+    # Supabase'den flashcards tablosundaki tüm verileri çekiyoruz
+    response = (
+        supabase.table("flashcards").select("*").order("id", desc=True).execute()
+    )
+    questions = response.data
+
+    if questions:
+      st.success(f"Veritabanında toplam **{len(questions)}** soru bulunuyor.")
+
+      # Filtreleme için arama kutusu
+      search_term = st.text_input(
+          "🔍 Soru veya Konularda Ara:",
+          placeholder="Kelime yazın...",
+          key="search_question",
+      )
+
+      for q in questions:
+        q_text = q.get("question_text", "")
+        q_topic = q.get("topic", "")
+
+        # Arama filtresi mantığı
+        if (
+            search_term.lower() in q_text.lower()
+            or search_term.lower() in q_topic.lower()
+        ):
+          with st.expander(
+              f"[{q.get('subject', 'Ders Yok')}]"
+              f" {q.get('grade', 'Sınıf Yok')} | Konu: {q_topic}"
+          ):
+            st.markdown(f"**Soru Metni:**\n{q_text}")
+            st.markdown(f"✅ **Doğru Cevap:** {q.get('correct_answer', '-')}")
+
+            col1, col2, col3 = st.columns(3)
+            with col1:
+              st.caption(f"Çeldirici 1: {q.get('distractor_1', '-')}")
+            with col2:
+              st.caption(f"Çeldirici 2: {q.get('distractor_2', '-')}")
+            with col3:
+              st.caption(f"Çeldirici 3: {q.get('distractor_3', '-')}")
+
+            if q.get("term") or q.get("definition"):
+              st.info(
+                  f"**Terim:** {q.get('term', '-')} | **Tanım:**"
+                  f" {q.get('definition', '-')}"
+              )
+    else:
+      st.info(
+          "Henüz veritabanına kaydedilmiş bir soru bulunmuyor. 'Yeni Soru /"
+          " Flashcard Ekle' sekmesinden soru ekleyebilirsiniz."
+      )
+
+  except Exception as e:
+    st.error(f"Sorular yüklenirken bir bağlantı hatası oluştu: {e}")
+      
