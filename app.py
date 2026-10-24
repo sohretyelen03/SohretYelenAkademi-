@@ -3,17 +3,17 @@ import streamlit.components.v1 as components
 from supabase import create_client
 
 # ---------------------------------------------------------
-# 1. SAYFA YAPILANDIRMASI & TEMA SEÇİMİ
+# 1. SAYFA YAPILANDIRMASI
 # ---------------------------------------------------------
 st.set_page_config(
-    page_title="Şöhret Yelen Akademi - Yönetim & Eğitim LMS",
+    page_title="Şöhret Yelen Akademi - Güvenli LMS",
     page_icon="🎓",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
 # ---------------------------------------------------------
-# 2. SUPABASE BAĞLANTISI (SECRETS YÖNETİMİ)
+# 2. SUPABASE BAĞLANTISI
 # ---------------------------------------------------------
 SUPABASE_URL = st.secrets.get("SUPABASE_URL", "")
 SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", "")
@@ -33,18 +33,130 @@ def init_supabase():
 supabase = init_supabase()
 
 # ---------------------------------------------------------
-# 3. YAN MENÜ (SIDEBAR) & YÖNETİCİ BİLGİSİ
+# 3. OTURUM (SESSION STATE) KONTROLÜ
+# ---------------------------------------------------------
+if "authenticated" not in st.session_state:
+  st.session_state["authenticated"] = False
+
+# =========================================================
+# GİRİŞ EKRANI (Eğer oturum açılmadıysa)
+# =========================================================
+if not st.session_state["authenticated"]:
+  st.markdown("<br><br>", unsafe_allow_html=True)
+  col1, col2, col3 = st.columns([1, 2, 1])
+
+  with col2:
+    st.markdown(
+        "<h2 style='text-align: center;'>🎓 Şöhret Yelen Akademi</h2>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        "<p style='text-align: center; color: gray;'>EBA Tarzı Yapılandırmacı"
+        " Eğitim ve Yönetim Paneli</p>",
+        unsafe_allow_html=True,
+    )
+    st.markdown("---")
+
+    with st.form("login_form"):
+      st.markdown("### 🔐 Yetkili Girişi")
+      email_input = st.text_input(
+          "E-posta Adresi", placeholder="ornek@sohretyelen.com"
+      )
+      password_input = st.text_input(
+          "Şifre", type="password", placeholder="••••••••"
+      )
+      submit_login = st.form_submit_button(
+          "Güvenli Giriş Yap", use_container_width=True
+      )
+
+      if submit_login:
+        if email_input and password_input:
+          try:
+            response = supabase.auth.sign_in_with_password({
+                "email": email_input,
+                "password": password_input,
+            })
+            if response.user:
+              st.session_state["authenticated"] = True
+              st.session_state["user_email"] = email_input
+              st.success("Giriş başarılı! Yönlendiriliyorsunuz...")
+              st.rerun()
+          except Exception as e:
+            st.error(
+                "Giriş başarısız! E-posta veya şifre hatalı.\nHata: {e}"
+            )
+        else:
+          st.warning("Lütfen e-posta ve şifrenizi giriniz.")
+
+    st.info(
+        "💡 *Not: Supabase Authentication üzerinden yetkilendirilmiş hesap"
+        " gereklidir.*"
+    )
+
+  st.stop()
+
+# =========================================================
+# ANA UYGULAMA SABİTLERİ (YKS KONULARI)
+# =========================================================
+TYT_MAT_KONULARI = [
+    "Temel Kavramlar & Sayılar",
+    "Bölme - Bölünebilme & EBOB-EKOK",
+    "Rasyonel Sayılar & Basit Eşitsizlikler",
+    "Mutlak Değer & Üslü-Köklü İfadeler",
+    "Çarpanlara Ayırma & Oran-Orantı",
+    "Problemler (Sayı, Kesir, Yaş, Yüzde, Hareket)",
+    "Mantık, Kümeler & Fonksiyonlar",
+    "Permütasyon, Kombinasyon, Olasılık",
+    "TYT Geometri (Doğroda-Üçgende Açılar, Çokgenler)",
+]
+
+TYT_FIZIK_KONULARI = [
+    "Fizik Bilimine Giriş & Madde ve Özellikleri",
+    "Kuvvet, Hareket & Vektörler (Temel)",
+    "İş, Güç ve Enerji",
+    "Isı, Sıcaklık ve Genleşme",
+    "Basınç ve Kaldırma Kuvveti",
+    "Elektrostatik & Elektrik Akımı",
+    "Dalgalar & Optik (Yansıma, Kırılma, Mercekler)",
+]
+
+AYT_MAT_KONULARI = [
+    "Polinomlar & 2. Dereceden Denklemler",
+    "Karmaşık Sayılar & Eşitsizlik Sistemleri",
+    "Parabol & Fonksiyon Uygulamaları",
+    "Trigonometri (Teoremler, Denklemler, Grafikler)",
+    "Logaritma & Diziler (Aritmetik/Geometrik)",
+    "Limit ve Süreklilik",
+    "Türev & Uygulamaları (Maks-Min, Teğet Eğimi)",
+    "İntegral & Alan Hesabı",
+    "AYT Analitik Geometri & Çemberin Analitiği",
+]
+
+AYT_FIZIK_KONULARI = [
+    "Vektörler & Bağıl Hareket",
+    "Newton'un Hareket Yasaları & 1D/2D Atışlar",
+    "İş, Enerji ve Çizgisel Momentum",
+    "Tork, Denge & Kütle Merkezi",
+    "Elektriksel Alan, Potansiyel & Kondansatörler",
+    "Manyetizma, İndüksiyon & Alternatif Akım",
+    "Düzgün Çembersel Hareket & Dönerek Öteleme",
+    "Basit Harmonik Hareket & Kepler Yasaları",
+    "Dalga Mekaniği (Girişim, Kırınım, Doppler)",
+    "Atom Fiziğine Giriş, Fotoelektrik & Modern Fizik",
+]
+
+# ---------------------------------------------------------
+# YAN MENÜ (SIDEBAR)
 # ---------------------------------------------------------
 with st.sidebar:
   st.title("🎓 Şöhret Yelen Akademi")
-  st.caption("Yapılandırmacı & Mantık Odaklı LMS")
+  st.caption("EBA Tarzı Yapılandırmacı LMS")
   st.markdown("---")
-  st.markdown("**👤 Yetkili Eğitmen:** Şöhret Yelen")
+  st.markdown(f"**👤 Aktif Eğitmen:** {st.session_state.get('user_email', '-')}")
   st.markdown("**🛡️ Rol:** Kurucu / Master Yönetici")
   st.markdown("---")
   st.markdown("### 📌 Sistem İstatistikleri")
 
-  # Veritabanı canlı soru sayısını çekme
   try:
     res = supabase.table("flashcards").select("id", count="exact").execute()
     total_q = res.count if res.count is not None else 0
@@ -52,135 +164,218 @@ with st.sidebar:
   except Exception:
     st.metric(label="Toplam Kayıtlı Soru", value="-")
 
-  st.info(
-      "💡 *İlkokul ve ortaokul için 4 şık (A-D), Lise kademeleri için 5 şık"
-      " (A-E) otomatik uygulanır.*"
-  )
+  st.markdown("---")
+  if st.button("🚪 Oturumu Kapat (Çıkış Yap)", use_container_width=True):
+    supabase.auth.sign_out()
+    st.session_state["authenticated"] = False
+    st.rerun()
 
 # ---------------------------------------------------------
-# 4. ANA BAŞLIK
+# ANA BAŞLIK
 # ---------------------------------------------------------
-st.title("📚 Şöhret Yelen Akademi | Öğretmen & İçerik Yönetim Paneli")
+st.title("📚 Şöhret Yelen Akademi | Dijital Eğitim Portalı")
 st.markdown(
-    "Fizik, Matematik ve Fen Bilgisi pedagojik içerik, soru bankası ve dinamik"
-    " ödevlendirme sistemi."
+    "İlkokul, Ortaokul, LGS ve **YKS (TYT/AYT Matematik & Fizik)** EBA Tarzı"
+    " Yönetim ve İçerik Merkezi."
 )
 st.markdown("---")
 
 # ---------------------------------------------------------
-# 5. MODÜLER SEKME (TAB) YAPISI
+# EBA TARZI 5'Lİ MODÜLER SEKME YAPISI
 # ---------------------------------------------------------
-tab1, tab2, tab3, tab4 = st.tabs([
-    "🎯 Kritik Kazanımlar & Ödevlendirme",
-    "🔗 Kavram Haritası, Konu Anlatımı & Medya",
-    "➕ Yeni Soru & Flashcard Ekle",
-    "📚 Soru Deposu & Arşiv",
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "🏛️ Ana Pano",
+    "🎯 Çalışma Kağıdı & Ödev",
+    "🔗 Konu Sayfaları & Yanılgılar",
+    "➕ Yeni Soru Ekle",
+    "📚 Soru Deposu & Sunum Modu",
 ])
 
 # =========================================================
-# SEKME 1: KRİTİK KAZANIMLAR VE ÖDEVLENDİRME
+# SEKME 1: 🏛️ ANA PANO (EBA Tarzı Dashboard)
 # =========================================================
 with tab1:
-  st.subheader("🎯 Kritik Kazanımlar ve Akıllı Ödevlendirme")
+  st.subheader("🏛️ Şöhret Yelen Akademi - Yönetim Panosu")
   st.markdown(
-      "Öğrencilerin kavram yanılgılarını takip edin ve kademelere uygun"
-      " ödevler planlayın."
+      "Sistemdeki tüm materyallere hızlıca erişin ve genel durumu gözlemleyin."
   )
 
-  col_k1, col_k2 = st.columns(2)
-  with col_k1:
-    st.selectbox(
-        "Kazanım Analizi İçin Sınıf Seçin",
-        [
-            "İlkokul Matematik (1-4. Sınıf)",
-            "Ortaokul Matematik & Fen (5-8. Sınıf)",
-            "LGS Hazırlık (8. Sınıf Özel)",
-            "Lise Matematik (9-12. Sınıf)",
-            "Lise Fizik (9-12. Sınıf)",
-        ],
+  # Üst Özet Kartları (Metrikler)
+  col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+  with col_m1:
+    st.metric(
+        label="📚 Toplam Soru Havuzu",
+        value=total_q if "total_q" in locals() else "0",
     )
-  with col_k2:
-    st.selectbox(
-        "Zorluk Kademesi Hedefi", ["Tüm Seviyeler", "🟢 Kolay", "🟡 Orta", "🔴 Zor"]
-    )
+  with col_m2:
+    st.metric(label="🎯 Aktif Sınav Kademeleri", value="İlkokul - LGS - YKS")
+  with col_m3:
+    st.metric(label="🧪 Fizik & Matematik", value="Entegre Modül")
+  with col_m4:
+    st.metric(label="🛡️ Güvenlik Durumu", value="Aktif (Supabase Auth)")
 
-  st.info(
-      "📊 Henüz öğrenci analiz verisi girilmedi. Sorular eklendikçe dinamik"
-      " ödev havuzu burada listelenecektir."
+  st.markdown("---")
+  st.markdown("### ⚡ Hızlı Erişim Kısayolları")
+
+  hc1, hc2, hc3 = st.columns(3)
+  with hc1:
+    st.info("🎯 **Çalışma Kağıdı Oluştur**\n\nSeçtiğin konulardan test föyü hazırla.")
+  with hc2:
+    st.success(
+        "🔗 **Konu & Yanılgı İncele**\n\nFizik/Matematik formül ve tuzakları."
+    )
+  with hc3:
+    st.warning("➕ **Soru Ekle**\n\nDinamik şıklar ve zorluk dereceleriyle ekle.")
+
+  st.markdown("---")
+  st.markdown(
+      "💡 *Sol sekmeleri kullanarak dilediğiniz modüle anında geçiş"
+      " yapabilirsiniz.*"
   )
 
 # =========================================================
-# SEKME 2: KAVRAM HARİTASI, KONU ANLATIMI VE MEDYA
+# SEKME 2: 🎯 ÇALIŞMA KAĞIDI & ÖDEV OLUŞTURUCU
 # =========================================================
 with tab2:
-  st.subheader("🔗 Kavram Haritası, Etkileşimli Konu Anlatımı & Medya")
+  st.subheader("🎯 Akıllı Çalışma Kağıdı & Test Föyü Hazırlayıcı")
   st.markdown(
-      "Formül türetme adımları, görsel diyagramlar, animasyonlar ve GeoGebra"
-      " simülasyonları."
+      "Soru deposundan kriterlere uygun soruları süzerek çalışma kağıdı"
+      " oluşturun."
   )
 
-  sub_tab_a, sub_tab_b, sub_tab_c = st.tabs(
-      ["📖 Konu Özeti & Formül Türetimi", "🖼️ Visual & GIF / MP4 Medya", "📐 GeoGebra / PhET Simülasyon"]
-  )
+  wc1, wc2, wc3 = st.columns(3)
+  with wc1:
+    work_grade = st.selectbox(
+        "Seviye / Sınav Grubu",
+        ["İlkokul", "Ortaokul", "LGS", "TYT", "AYT", "Lise"],
+        key="w_grade",
+    )
+  with wc2:
+    work_diff = st.selectbox(
+        "Zorluk Hedefi",
+        ["Tümü", "🟢 Kolay", "🟡 Orta", "🔴 Zor"],
+        key="w_diff",
+    )
+  with wc3:
+    work_limit = st.slider(
+        "Soru Adedi Seçin", min_value=1, max_value=20, value=5
+    )
 
-  with sub_tab_a:
-    st.markdown("### 💡 Formül Nereden Geldi? (Derivasyon Odaklı Anlatım)")
-    st.write(
-        "Örnek Konu: **Newton'un 2. Hareket Yasası ($F = m \\cdot a$)**"
-    )
-    st.warning(
-        "**Kavram Yanılgısı:** Kuvvet, bir cismin sahip olduğu bir özellik"
-        " değildir; etkileşimin sonucudur!"
-    )
-    st.success(
-        "**Derivasyon:** Bir cisme uygulanan net kuvvet arttıkça ivme artar ($F"
-        " \\propto a$). Kütle arttıkça ivmelenmek zorlaşır ($a \\propto 1/m$)."
-        " Buradan $F = m \\cdot a$ bağıntısına ulaşılır."
-    )
+  if st.button("🚀 Çalışma Kağıdını Derle", use_container_width=True):
+    try:
+      resp = supabase.table("flashcards").select("*").execute()
+      q_data = resp.data
+      if q_data:
+        matched_qs = [
+            q
+            for q in q_data
+            if work_grade.lower() in str(q.get("grade", "")).lower()
+            and (work_diff == "Tümü" or work_diff in str(q.get("difficulty", "")))
+        ]
+        selected_qs = matched_qs[:work_limit]
 
-  with sub_tab_b:
-    st.markdown("### 🎬 Visual & Animasyon Gömme Alanı")
-    gorsel_url = st.text_input(
-        "Görsel veya GIF URL'si Gömdürün:",
-        placeholder="https://example.com/animasyon.gif",
-    )
-    if gorsel_url:
-      try:
-        st.image(
-            gorsel_url,
-            caption="Konu Anlatım Görseli / Animasyonu",
-            use_container_width=True,
-        )
-      except Exception as e:
-        st.error(f"Görsel yüklenemedi: {e}")
-    else:
-      st.info(
-          "Yukarıdaki alana resim (PNG/JPG) veya animasyon (GIF) linki girerek"
-          " anlatımlara görsel ekleyebilirsiniz."
-      )
-
-  with sub_tab_c:
-    st.markdown("### 📐 Canlı Etkileşimli GeoGebra / PhET Simülasyonu")
-    sim_embed_code = st.text_input(
-        "GeoGebra / PhET Embed (iframe) Linki:",
-        placeholder="https://www.geogebra.org/material/iframe/id/...",
-    )
-    if sim_embed_code:
-      components.iframe(sim_embed_code, height=500, scrolling=True)
-    else:
-      st.info(
-          "GeoGebra veya PhET simülasyon iframe bağlantısını buraya yapıştırarak"
-          " öğrencinin deneyimlemesini sağlayabilirsiniz."
-      )
+        if selected_qs:
+          st.success(
+              f"🎉 Başarıyla {len(selected_qs)} soruluk çalışma kağıdı"
+              " derlendi!"
+          )
+          st.markdown("---")
+          for idx, item in enumerate(selected_qs, 1):
+            st.markdown(f"**Soru {idx}:** {item.get('question_text')}")
+            if item.get("image_url"):
+              st.image(item.get("image_url"), width=300)
+            st.markdown(
+                f"- A) {item.get('option_a')}\n- B)"
+                f" {item.get('option_b')}\n- C) {item.get('option_c')}\n- D)"
+                f" {item.get('option_d')}"
+                + (
+                    f"\n- E) {item.get('option_e')}"
+                    if item.get("option_e")
+                    else ""
+                )
+            )
+            st.caption(
+                f"Doğru Cevap: {item.get('correct_answer')} | Zorluk:"
+                f" {item.get('difficulty')}"
+            )
+            st.markdown("---")
+        else:
+          st.warning(
+              "Bu kriterlere uygun veritabanında soru bulunamadı. Lütfen önce"
+              " soru ekleyin."
+          )
+    except Exception as e:
+      st.error(f"Çalışma kağıdı oluşturulurken hata: {e}")
 
 # =========================================================
-# SEKME 3: YENİ SORU / FLASHCARD EKLE
+# SEKME 3: 🔗 KAVRAM HARİTASI, KONU SAYFALARI & YANILGILAR
 # =========================================================
 with tab3:
+  st.subheader("🔗 YKS & Ders Konu Sayfaları ve Kavram Yanılgıları")
+  st.markdown(
+      "Formül derivasyonları, animasyon alanları ve öğrencilerin en sık"
+      " düştüğü tuzaklar."
+  )
+
+  yks_exam_type = st.radio(
+      "Sınav / Alan Türü:",
+      ["🔴 TYT (Temel Yeterlilik)", "🟣 AYT (Alan Yeterlilik)"],
+      horizontal=True,
+  )
+
+  if "TYT" in yks_exam_type:
+    sub_t_mat, sub_t_fiz = st.tabs(
+        ["📐 TYT Matematik Sayfaları", "🧲 TYT Fizik Sayfaları"]
+    )
+
+    with sub_t_mat:
+      st.selectbox("TYT Matematik Konusu:", TYT_MAT_KONULARI)
+      st.markdown("### 💡 Konu Özeti & Formül Çıkarımı")
+      st.latex(r"(a+b)^2 = a^2 + 2ab + b^2")
+      st.warning(
+          "⚠️ **Kavram Yanılgısı:** Öğrenciler genellikle $(a+b)^2$ ifadesini"
+          " $a^2 + b^2$ olarak açma hatası yaparlar."
+      )
+
+    with sub_t_fiz:
+      st.selectbox("TYT Fizik Konusu:", TYT_FIZIK_KONULARI)
+      st.markdown("### 💡 Fizik Bilimine Giriş & Madde")
+      st.success(
+          "💡 **İpucu:** Özkütle ($d = m/V$) ayırt edici bir özelliktir ancak"
+          " tek başına sabit değildir; sıcaklık ve basınçla değişebilir!"
+      )
+
+  else:
+    sub_a_mat, sub_a_fiz = st.tabs(
+        ["📐 AYT Matematik Sayfaları", "🧲 AYT Fizik Sayfaları"]
+    )
+
+    with sub_a_mat:
+      st.selectbox("AYT Matematik Konusu:", AYT_MAT_KONULARI)
+      st.markdown("### 📐 Türev & Teğet Eğimi")
+      st.latex(r"f'(x) = \lim_{h \to 0} \frac{f(x+h) - f(x)}{h}")
+      st.warning(
+          "⚠️ **Kavram Yanılgısı:** Türevin sıfır olduğu noktalar her zaman"
+          " yerel ekstremum olmak zorunda değildir (Örn: $f(x)=x^3$). Başlangıç"
+          " büküm noktası olabilir."
+      )
+
+    with sub_a_fiz:
+      st.selectbox("AYT Fizik Konusu:", AYT_FIZIK_KONULARI)
+      st.markdown("### 🧲 Düzgün Çembersel Hareket & İvme")
+      st.latex(r"a_c = \frac{v^2}{r} = \omega^2 r")
+      st.success(
+          "💡 **Mantıksal Temel:** Cisim sabit hızla dönse bile hız vektörünün"
+          " yönü sürekli değiştiği için merkezcil ivme daima mevcuttur."
+      )
+
+# =========================================================
+# SEKME 4: ➕ YENİ SORU EKLEME
+# =========================================================
+with tab4:
   st.subheader("➕ Yeni Soru & Flashcard Ekleme Paneli")
   st.markdown(
-      "Seçilen sınıf seviyesine göre **şık sayısı (4 veya 5)** ve **zorluk"
-      " derecesi** otomatik ayarlanır."
+      "Seçilen seviyeye göre şık sayısı (4 veya 5) otomatik ayarlanır."
   )
 
   with st.form("add_question_form", clear_on_submit=True):
@@ -191,23 +386,24 @@ with tab3:
           "Ders Seçin", ["Fizik", "Matematik", "Fen Bilgisi"]
       )
       grade = st.selectbox(
-          "Sınıf Düzeyi",
+          "Sınıf / Sınav Seviyesi",
           [
               "İlkokul / 1-4. Sınıf",
-              "Ortaokul / 5. Sınıf",
-              "Ortaokul / 6. Sınıf",
-              "Ortaokul / 7. Sınıf",
-              "Ortaokul / 8. Sınıf (LGS Hazırlık)",
+              "Ortaokul / 5-7. Sınıf",
+              "Ortaokul / 8. Sınıf (LGS)",
               "Lise / 9. Sınıf",
               "Lise / 10. Sınıf",
               "Lise / 11. Sınıf",
-              "Lise / 12. Sınıf (YKS)",
+              "Lise / 12. Sınıf",
+              "YKS / TYT Hazırlık",
+              "YKS / AYT Hazırlık",
           ],
       )
 
     with c2:
       topic = st.text_input(
-          "Konu / Alt Kazanım", placeholder="Örn: Newton Yasaları / Kesirler"
+          "Konu / Alt Kazanım",
+          placeholder="Örn: AYT Türev / TYT Hareket / Ebob-Ekok",
       )
       question_type = st.selectbox(
           "Soru Tipi",
@@ -215,7 +411,8 @@ with tab3:
               "Kazanım Kavrama",
               "Yeni Nesil / Beceri Temelli",
               "LGS Çıkmış / Örnek Soru",
-              "ÖSYM / YKS Formatı",
+              "ÖSYM / TYT Formatı",
+              "ÖSYM / AYT Formatı",
           ],
       )
 
@@ -228,19 +425,18 @@ with tab3:
     question_text = st.text_area(
         "Soru Metni", placeholder="Sorunun detaylı metnini buraya yazın..."
     )
-
     image_url = st.text_input(
-        "Soru Görseli URL (Varsa)",
-        placeholder="https://... (Görselli soru ise resim bağlantısı)",
+        "Soru Görseli URL (Varsa)", placeholder="https://..."
     )
 
-    # DİNAMİK ŞIK SAYISI MANTIĞI: Lise seçildiyse 5 şık, diğerlerinde 4 şık
-    is_lise = "Lise" in grade
-    option_count = 5 if is_lise else 4
+    is_five_options = (
+        ("Lise" in grade) or ("YKS" in grade) or ("TYT" in grade) or ("AYT" in grade)
+    )
+    option_count = 5 if is_five_options else 4
     option_labels = ["A", "B", "C", "D", "E"][:option_count]
 
     st.markdown(
-        f"**Seçenekler ({option_count} Şık - {'Lise Seviyesi' if is_lise else 'İlkokul/Ortaokul Seviyesi'}):**"
+        f"**Seçenekler ({option_count} Şık - {'Lise / YKS Formatı' if is_five_options else 'İlkokul / Ortaokul Formatı'}):**"
     )
 
     sc1, sc2 = st.columns(2)
@@ -250,7 +446,7 @@ with tab3:
       opt_c = st.text_input("C Şıkkı Metni")
     with sc2:
       opt_d = st.text_input("D Şıkkı Metni")
-      opt_e = st.text_input("E Şıkkı Metni") if is_lise else ""
+      opt_e = st.text_input("E Şıkkı Metni") if is_five_options else ""
 
     correct_answer = st.selectbox(
         "🎯 Doğru Cevap Hangi Şık?",
@@ -259,20 +455,16 @@ with tab3:
     )
 
     st.markdown("---")
-    st.markdown("**Pedagojik Notlar & Tanımlar (İsteğe Bağlı):**")
+    st.markdown("**Pedagojik Notlar & Yanılgılar:**")
     tc1, tc2 = st.columns(2)
     with tc1:
-      term = st.text_input(
-          "Önemli Terim / Kavram", placeholder="Örn: İvme / Sürtünme Kuvveti"
-      )
+      term = st.text_input("Önemli Terim / Kavram", placeholder="Örn: Türev")
       misconception = st.text_input(
-          "Olası Kavram Yanılgısı",
-          placeholder="Örn: Hız ile ivmeyi karıştırma",
+          "Olası Kavram Yanılgısı", placeholder="Örn: Sıfır türev noktası"
       )
     with tc2:
       definition = st.text_area(
-          "Terim Tanımı / Açıklaması",
-          placeholder="Kavramın mantıksal açıklaması...",
+          "Terim Tanımı / Açıklaması", placeholder="Kavramın mantığı..."
       )
 
     submit_btn = st.form_submit_button("💾 Soruyu Veritabanına Kaydet")
@@ -292,48 +484,45 @@ with tab3:
               "option_b": opt_b,
               "option_c": opt_c,
               "option_d": opt_d,
-              "option_e": opt_e if is_lise else None,
+              "option_e": opt_e if is_five_options else None,
               "correct_answer": correct_answer,
               "term": term if term else None,
               "definition": definition if definition else None,
               "misconception": misconception if misconception else None,
           }
           supabase.table("flashcards").insert(payload).execute()
-          st.success(
-              "Soru ve seçenekler başarıyla Supabase veritabanına kaydedildi!"
-              " 🎉"
-          )
+          st.success("Soru başarıyla kaydedildi! 🎉")
         except Exception as err:
-          st.error(f"Veritabanına kaydederken hata oluştu: {err}")
+          st.error(f"Hata oluştu: {err}")
       else:
-        st.warning(
-            "Lütfen Soru Metni, Konu ve en azından A ve B şıklarını doldurun."
-        )
+        st.warning("Lütfen gerekli alanları doldurun.")
 
 # =========================================================
-# SEKME 4: SORU DEPOSU VE ARŞİV
+# SEKME 5: 📚 SORU DEPOSU & İNTERAKTİF SUNUM / ÇÖZÜM MODU
 # =========================================================
-with tab4:
-  st.subheader("📚 Soru Bankası & Dijital Arşiv")
+with tab5:
+  st.subheader("📚 Soru Bankası & İnteraktif Soru Çözüm Modu")
   st.markdown(
-      "Gelişmiş filtreleme alanıyla kayıtlı tüm soruları inceleyin ve arayın."
+      "Ders işlerken veya soru çözerken şıkları gizleyip açabileceğiniz sunum"
+      " modu."
   )
 
-  # Filtreleme Arayüzü
+  presentation_mode = st.toggle(
+      "🖥️ İnteraktif Soru Çözüm / Sunum Modunu Aktif Et (Şıkları Gizle)"
+  )
+
   fc1, fc2, fc3 = st.columns(3)
   with fc1:
     filter_grade = st.selectbox(
-        "Sınıf Seviyesine Göre Filtrele",
-        ["Tümü", "İlkokul", "Ortaokul", "LGS", "Lise"],
+        "Kademe Filtresi",
+        ["Tümü", "İlkokul", "Ortaokul", "LGS", "TYT", "AYT", "Lise"],
     )
   with fc2:
     filter_diff = st.selectbox(
-        "Zorluğa Göre Filtrele", ["Tümü", "🟢 Kolay", "🟡 Orta", "🔴 Zor"]
+        "Zorluk Filtresi", ["Tümü", "🟢 Kolay", "🟡 Orta", "🔴 Zor"]
     )
   with fc3:
-    search_keyword = st.text_input(
-        "🔍 Kelime ile Arama Yap", placeholder="Metin veya konu yazın..."
-    )
+    search_keyword = st.text_input("🔍 Kelime Ara", placeholder="Konu veya metin...")
 
   st.markdown("---")
 
@@ -344,7 +533,6 @@ with tab4:
     questions = response.data
 
     if questions:
-      # Filtreleme mantığı
       filtered_list = []
       for q in questions:
         q_grade = str(q.get("grade") or "")
@@ -352,13 +540,10 @@ with tab4:
         q_text = str(q.get("question_text") or "")
         q_topic = str(q.get("topic") or "")
 
-        # Kademe filtresi
         match_grade = (filter_grade == "Tümü") or (
             filter_grade.lower() in q_grade.lower()
         )
-        # Zorluk filtresi
         match_diff = (filter_diff == "Tümü") or (filter_diff in q_diff)
-        # Kelime araması
         sk = search_keyword.lower()
         match_search = (
             (sk == "") or (sk in q_text.lower()) or (sk in q_topic.lower())
@@ -368,7 +553,7 @@ with tab4:
           filtered_list.append(q)
 
       st.write(
-          f"Bulunan Soru Sayısı: **{len(filtered_list)}** / Total:"
+          f"Bulunan Soru: **{len(filtered_list)}** / Toplam:"
           f" **{len(questions)}**"
       )
 
@@ -383,57 +568,81 @@ with tab4:
           st.markdown(f"**Zorluk:** {diff_badge}")
           st.markdown(f"**Soru Metni:**\n{item.get('question_text')}")
 
-          # Varsa Soru Görseli
-          img_link = item.get("image_url")
-          if img_link:
+          if item.get("image_url"):
             st.image(
-                img_link, caption="Soru Görseli", use_container_width=False
+                item.get("image_url"),
+                caption="Soru Görseli",
+                use_container_width=False,
             )
 
           st.markdown("---")
-          st.markdown("**Şıklar:**")
 
-          st.markdown(
-              f"- **A)** {item.get('option_a', '-')}"
-              + (" ✅" if c_ans == "A" else "")
-          )
-          st.markdown(
-              f"- **B)** {item.get('option_b', '-')}"
-              + (" ✅" if c_ans == "B" else "")
-          )
-          st.markdown(
-              f"- **C)** {item.get('option_c', '-')}"
-              + (" ✅" if c_ans == "C" else "")
-          )
-          st.markdown(
-              f"- **D)** {item.get('option_d', '-')}"
-              + (" ✅" if c_ans == "D" else "")
-          )
-
-          opt_e_val = item.get("option_e")
-          if opt_e_val:
-            st.markdown(
-                f"- **E)** {opt_e_val}" + (" ✅" if c_ans == "E" else "")
+          # Eğer İnteraktif Sunum Modu Açıksa şıkları gizle/aç düğmesi koy
+          if presentation_mode:
+            show_options = st.checkbox(
+                f"👁️ Şıkları Göster (Soru ID: {item.get('id')})", value=False
             )
+            if show_options:
+              st.markdown("**Şıklar:**")
+              st.markdown(
+                  f"- **A)** {item.get('option_a')}"
+                  + (" ✅" if c_ans == "A" else "")
+              )
+              st.markdown(
+                  f"- **B)** {item.get('option_b')}"
+                  + (" ✅" if c_ans == "B" else "")
+              )
+              st.markdown(
+                  f"- **C)** {item.get('option_c')}"
+                  + (" ✅" if c_ans == "C" else "")
+              )
+              st.markdown(
+                  f"- **D)** {item.get('option_d')}"
+                  + (" ✅" if c_ans == "D" else "")
+              )
+              if item.get("option_e"):
+                st.markdown(
+                    f"- **E)** {item.get('option_e')}"
+                    + (" ✅" if c_ans == "E" else "")
+                )
+              st.markdown(f"\n🎯 **Doğru Cevap:** **{c_ans} Şıkkı**")
+          else:
+            st.markdown("**Şıklar:**")
+            st.markdown(
+                f"- **A)** {item.get('option_a')}"
+                + (" ✅" if c_ans == "A" else "")
+            )
+            st.markdown(
+                f"- **B)** {item.get('option_b')}"
+                + (" ✅" if c_ans == "B" else "")
+            )
+            st.markdown(
+                f"- **C)** {item.get('option_c')}"
+                + (" ✅" if c_ans == "C" else "")
+            )
+            st.markdown(
+                f"- **D)** {item.get('option_d')}"
+                + (" ✅" if c_ans == "D" else "")
+            )
+            if item.get("option_e"):
+                st.markdown(
+                    f"- **E)** {item.get('option_e')}"
+                    + (" ✅" if c_ans == "E" else "")
+                )
+            st.markdown(f"\n🎯 **Doğru Cevap:** **{c_ans} Şıkkı**")
 
-          st.markdown(f"\n🎯 **Doğru Cevap:** **{c_ans} Şıkkı**")
-
-          # Pedagojik Detaylar
-          term_val = item.get("term")
-          def_val = item.get("definition")
-          misc_val = item.get("misconception")
-
-          if term_val or def_val or misc_val:
+          # Pedagojik Notlar
+          if (
+              item.get("term")
+              or item.get("definition")
+              or item.get("misconception")
+          ):
             st.info(
-                f"📌 **Kavram:** {term_val or '-'} \n\n"
-                f"📖 **Açıklama:** {def_val or '-'} \n\n"
-                f"⚠️ **Kavram Yanılgısı Notu:** {misc_val or '-'}"
+                f"📌 **Kavram:** {item.get('term') or '-'} \n\n"
+                f"📖 **Açıklama:** {item.get('definition') or '-'} \n\n"
+                f"⚠️ **Kavram Yanılgısı:** {item.get('misconception') or '-'}"
             )
     else:
-      st.info(
-          "Henüz veritabanına kayıtlı bir soru bulunmamaktadır. 'Yeni Soru"
-          " Ekle' sekmesinden ekleyebilirsiniz."
-      )
-
+      st.info("Kayıtlı soru bulunamadı.")
   except Exception as e:
-    st.error(f"Soru deposu yüklenirken bir hata oluştu: {e}")
+    st.error(f"Soru deposu yüklenirken hata oluştu: {e}")
