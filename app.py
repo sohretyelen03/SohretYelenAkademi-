@@ -1,508 +1,439 @@
-import datetime
-import matplotlib.pyplot as plt
-import pandas as pd
-from supabase import create_client
 import streamlit as st
-from streamlit_agraph import Config, Edge, Node, agraph
+import streamlit.components.v1 as components
+from supabase import create_client
 
-# -----------------------------------------------------------------------------
-# 1. SİSTEM VE SAYFA YAPILANDIRMASI
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------
+# 1. SAYFA YAPILANDIRMASI & TEMA SEÇİMİ
+# ---------------------------------------------------------
 st.set_page_config(
-    page_title="Şöhret Yelen Akademi",
+    page_title="Şöhret Yelen Akademi - Yönetim & Eğitim LMS",
     page_icon="🎓",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# Supabase Bağlantı Bilgileri
-SUPABASE_URL = st.secrets.get("SUPABASE_URL", "https://your-supabase-url.supabase.co")
-SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", "your-anon-key")
+# ---------------------------------------------------------
+# 2. SUPABASE BAĞLANTISI (SECRETS YÖNETİMİ)
+# ---------------------------------------------------------
+SUPABASE_URL = st.secrets.get("SUPABASE_URL", "")
+SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", "")
+
 
 @st.cache_resource
 def init_supabase():
-    return create_client(SUPABASE_URL, SUPABASE_KEY)
-
-try:
-    supabase = init_supabase()
-except Exception as e:
-    st.error("Veritabanı bağlantısı kurulamadı. Lütfen .streamlit/secrets.toml ayarlarınızı kontrol edin.")
-
-# Session State (Oturum) Durum Yönetimi
-if "authenticated" not in st.session_state:
-    st.session_state.authenticated = False
-if "username" not in st.session_state:
-    st.session_state.username = ""
-if "role" not in st.session_state:
-    st.session_state.role = ""
-
-# -----------------------------------------------------------------------------
-# 2. YARDIMCI MANTIK VE VERİTABANI FONKSİYONLARI
-# -----------------------------------------------------------------------------
-
-def update_mistake_spaced_repetition(student_id: str, card_id: int, is_correct: bool):
-    """Ebbinghaus Aralıklı Tekrar Modeli (SRS) Güncellemesi"""
-    try:
-        res = (
-            supabase.table("student_mistakes")
-            .select("*")
-            .eq("student_id", student_id)
-            .eq("card_id", card_id)
-            .execute()
-        )
-        if not res.data:
-            return
-
-        current_item = res.data[0]
-        current_level = current_item.get("box_level", 1)
-
-        if is_correct:
-            new_level = current_level + 1
-            if new_level > 4:
-                supabase.table("student_mistakes").delete().eq("id", current_item["id"]).execute()
-                st.toast("🏆 Harika! Kavram kalıcı hafızaya alındı ve havuzdan çıkarıldı.", icon="🧠")
-                return
-
-            intervals = {2: 1, 3: 3, 4: 7, 5: 15}
-            days_to_add = intervals.get(new_level, 1)
-            next_date = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=days_to_add)
-
-            supabase.table("student_mistakes").update({
-                "box_level": new_level,
-                "next_review_date": next_date.isoformat(),
-                "status": "reviewing"
-            }).eq("id", current_item["id"]).execute()
-
-            st.toast(f"✅ Doğru! Soru Seviye {new_level}'e yükseldi ({days_to_add} gün sonra tekrar sorulacak).", icon="📅")
-        else:
-            next_date = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=1)
-            supabase.table("student_mistakes").update({
-                "box_level": 1,
-                "next_review_date": next_date.isoformat(),
-                "status": "wrong"
-            }).eq("id", current_item["id"]).execute()
-            st.warning("❌ Yanlış cevap. Soru tekrar Seviye 1'e geriledi. Yarın tekrar çözülecek.")
-    except Exception as e:
-        st.error(f"SRS Güncelleme Hatası: {e}")
-
-
-def create_automatic_assignment(student_id: str, subject: str, topic: str, teacher_id: str, due_days: int = 7):
-    """Sınıf/Öğrenci Bazlı Otomatik Ödev Tanımlama"""
-    try:
-        cards_data = (
-            supabase.table("flashcards")
-            .select("id")
-            .eq("subject", subject)
-            .eq("topic", topic)
-            .execute()
-            .data
-        )
-        if not cards_data:
-            st.error(f"❌ **{topic}** konusuna ait kayıtlı soru bulunamadı.")
-            return False
-
-        card_ids = [c["id"] for c in cards_data]
-        due_date = (datetime.datetime.now() + datetime.timedelta(days=due_days)).isoformat()
-
-        payload = {
-            "student_id": student_id,
-            "subject": subject,
-            "topic": topic,
-            "assigned_by": teacher_id,
-            "card_ids": card_ids,
-            "status": "pending",
-            "due_date": due_date
-        }
-        supabase.table("assignments").insert(payload).execute()
-        st.toast(f"✅ {student_id} için '{topic}' ödevi atandı!", icon="🎉")
-        return True
-    except Exception as e:
-        st.error(f"Ödev atama hatası: {e}")
-        return False
-
-# -----------------------------------------------------------------------------
-# 3. KULLANICI GİRİŞ ARAYÜZÜ (LOGIN)
-# -----------------------------------------------------------------------------
-if not st.session_state.authenticated:
-    st.title("🎓 Şöhret Yelen Akademi")
-    st.subheader("Sisteme Giriş Yapın")
-
-    col_login, _ = st.columns([1, 1])
-    with col_login:
-        username_input = st.text_input("Ad Soyad", placeholder="Adınızı ve soyadınızı giriniz...")
-        role_input = st.selectbox("Rolünüz", ["Öğrenci", "Öğretmen"])
-
-        if st.button("Giriş Yap", use_container_width=True):
-            if username_input.strip():
-                st.session_state.authenticated = True
-                st.session_state.username = username_input.strip()
-                st.session_state.role = "student" if role_input == "Öğrenci" else "teacher"
-                st.rerun()
-            else:
-                st.warning("Lütfen Ad Soyad alanını doldurun.")
+  if not SUPABASE_URL or not SUPABASE_KEY:
+    st.error(
+        "Supabase bağlantı bilgileri (URL / Key) Streamlit Secrets içinde"
+        " bulunamadı!"
+    )
     st.stop()
+  return create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# -----------------------------------------------------------------------------
-# 4. YAN MENÜ (SIDEBAR) & OTURUM KONTROLÜ
-# -----------------------------------------------------------------------------
-st.sidebar.title("🎓 Şöhret Yelen Akademi")
-st.sidebar.markdown(f"**Kullanıcı:** `{st.session_state.username}`")
-st.sidebar.markdown(f"**Rol:** {'Öğretmen 👨‍🏫' if st.session_state.role == 'teacher' else 'Öğrenci 🧑‍🎓'}")
 
-if st.sidebar.button("🚪 Çıkış Yap", use_container_width=True):
-    st.session_state.authenticated = False
-    st.session_state.username = ""
-    st.session_state.role = ""
-    st.rerun()
+supabase = init_supabase()
 
-st.sidebar.markdown("---")
+# ---------------------------------------------------------
+# 3. YAN MENÜ (SIDEBAR) & YÖNETİCİ BİLGİSİ
+# ---------------------------------------------------------
+with st.sidebar:
+  st.title("🎓 Şöhret Yelen Akademi")
+  st.caption("Yapılandırmacı & Mantık Odaklı LMS")
+  st.markdown("---")
+  st.markdown("**👤 Yetkili Eğitmen:** Şöhret Yelen")
+  st.markdown("**🛡️ Rol:** Kurucu / Master Yönetici")
+  st.markdown("---")
+  st.markdown("### 📌 Sistem İstatistikleri")
 
-# -----------------------------------------------------------------------------
-# 5. ÖĞRENCİ MODÜLÜ
-# -----------------------------------------------------------------------------
-if st.session_state.role == "student":
-    st.title(f"👋 Hoş Geldin, {st.session_state.username}")
+  # Veritabanı canlı soru sayısını çekme
+  try:
+    res = supabase.table("flashcards").select("id", count="exact").execute()
+    total_q = res.count if res.count is not None else 0
+    st.metric(label="Toplam Kayıtlı Soru", value=total_q)
+  except Exception:
+    st.metric(label="Toplam Kayıtlı Soru", value="-")
 
-    tab_srs, tab_assignments, tab_graph = st.tabs([
-        "🧠 Aralıklı Tekrar & Hafıza Kutuları",
-        "📌 Atanan Ödevlerim",
-        "🌐 Kişisel Bilgi Ağım"
-    ])
-
-    with tab_srs:
-        st.subheader("🧠 Hafıza Kutuları Durumu (Leitner Modeli)")
-        try:
-            mistakes_res = (
-                supabase.table("student_mistakes")
-                .select("box_level")
-                .eq("student_id", st.session_state.username)
-                .execute()
-                .data
-            )
-            counts = {1: 0, 2: 0, 3: 0, 4: 0}
-            for m in mistakes_res:
-                lvl = m.get("box_level", 1)
-                if lvl in counts:
-                    counts[lvl] += 1
-        except Exception:
-            counts = {1: 0, 2: 0, 3: 0, 4: 0}
-
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("🔴 1. Seviye", f"{counts[1]} Soru", "1 Günlük Tekrar")
-        c2.metric("🟧 2. Seviye", f"{counts[2]} Soru", "3 Günlük Tekrar")
-        c3.metric("🟦 3. Seviye", f"{counts[3]} Soru", "7 Günlük Tekrar")
-        c4.metric("🏆 4. Seviye", f"{counts[4]} Soru", "Kalıcı Hafıza")
-
-        st.markdown("---")
-        st.subheader("🔄 Bugün Çözülmesi Gereken Tekrar Kartları")
-
-        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        try:
-            due_cards_raw = (
-                supabase.table("student_mistakes")
-                .select("card_id, box_level, flashcards(*)")
-                .eq("student_id", st.session_state.username)
-                .lte("next_review_date", now_iso)
-                .execute()
-                .data
-            )
-        except Exception:
-            due_cards_raw = []
-
-        if not due_cards_raw:
-            st.success("🎉 Harika! Bugün çözülmesi gereken hiçbir tekrar kartınız yok.")
-        else:
-            item = due_cards_raw[0]
-            card = item["flashcards"]
-            level = item["box_level"]
-
-            progress_val = level * 0.25
-            st.progress(progress_val, text=f"Öğrenme İlerlemesi: Seviye {level} / 4")
-
-            with st.container(border=True):
-                st.markdown(f"Ders / Konu: - **{card['topic']}**")
-                st.markdown(f"### ❓ Soru: {card['term']}")
-
-                options = [
-                    card["definition"],
-                    card["distractor_1"],
-                    card["distractor_2"],
-                    card["distractor_3"]
-                ]
-                user_ans = st.radio("Cevabınız:", options, key=f"ans_{card['id']}")
-
-                if st.button("Cevabı Onayla", use_container_width=True):
-                    is_correct = (user_ans == card["definition"])
-                    update_mistake_spaced_repetition(st.session_state.username, card["id"], is_correct)
-                    st.rerun()
-
-    with tab_assignments:
-        st.subheader("📌 Öğretmen Tarafından Atanan Özel Çalışma Setleri")
-        try:
-            asgns = (
-                supabase.table("assignments")
-                .select("*")
-                .eq("student_id", st.session_state.username)
-                .execute()
-                .data
-            )
-        except Exception:
-            asgns = []
-
-        if not asgns:
-            st.info("Atanmış aktif ödeviniz bulunmamaktadır.")
-        else:
-            for asg in asgns:
-                with st.container(border=True):
-                    st.markdown(f"#### 📚 {asg['subject']} - {asg['topic']}")
-                    st.caption(f"Atayan: {asg['assigned_by']} | Son Teslim: {asg['due_date'][:10]}")
-
-    with tab_graph:
-        st.subheader("🌐 Bireysel Kavram Ağım ve Kör Noktalarım")
-        st.caption("Fizik ve Matematik konularındaki kişisel kavramsal bağlarınız.")
-
-        nodes = [
-            Node(id="Trigonometri", label="Trigonometri\n(%40 Başarı)", size=25, color="#EF4444"),
-            Node(id="Vektörler", label="Vektörler\n(%65 Başarı)", size=25, color="#3B82F6"),
-            Node(id="Eğik Atış", label="Eğik Atış\n(%30 Başarı)", size=25, color="#F97316")
-        ]
-        edges = [
-            Edge(source="Trigonometri", target="Vektörler"),
-            Edge(source="Vektörler", target="Eğik Atış")
-        ]
-        config = Config(width=700, height=400, directed=True, physics=True)
-        agraph(nodes=nodes, edges=edges, config=config)
-
-# -----------------------------------------------------------------------------
-# 6. ÖĞRETMEN MODÜLÜ
-# -----------------------------------------------------------------------------
-else:
-    st.title("📊 Öğretmen Yönetim & Analiz Paneli")
-
-    tab_t1, tab_t2, tab_t3 = st.tabs([
-        "⚠️ Takılınan Konular & Otomatik Ödevlendirme",
-        "🌐 Sınıf Düzeyi Knowledge Graph",
-        "➕ Yeni Soru / Flashcard Ekle"
-    ])
-
-    # --- TAB 1: YANLIŞ ANALİZİ VE ÖDEV ATAMA ---
-    with tab_t1:
-        st.subheader("⚠️ En Çok Yanlış Yapılan Konular ve Anlık Ödevlendirme")
-
-        try:
-            mistakes_data = supabase.table("student_mistakes").select("*").execute().data
-        except Exception:
-            mistakes_data = []
-
-        if not mistakes_data:
-            st.info("Sistemde henüz kaydedilmiş yanlış soru verisi yok.")
-        else:
-            df = pd.DataFrame(mistakes_data)
-            grouped = df.groupby(["student_id", "subject", "topic"]).size().reset_index(name="hata_sayisi")
-            grouped = grouped.sort_values(by="hata_sayisi", ascending=False)
-
-            col_chart, col_list = st.columns([5, 4])
-
-            with col_chart:
-                st.write("📊 **Konu Bazlı Sınıf Hata Frekansı:**")
-                top_topics = df.groupby("topic").size().reset_index(name="toplam_hata").head(8)
-
-                fig, ax = plt.subplots(figsize=(6, 3.5), dpi=150)
-                ax.barh(top_topics["topic"], top_topics["toplam_hata"], color="#EF4444")
-                ax.set_xlabel("Toplam Yanlış / Boş Frekansı")
-                ax.spines["top"].set_visible(False)
-                ax.spines["right"].set_visible(False)
-                plt.tight_layout()
-                st.pyplot(fig)
-
-            with col_list:
-                st.write("📋 **Öğrenci Bazlı Kritik Konular:**")
-                for idx, row in grouped.iterrows():
-                    with st.container(border=True):
-                        st.markdown(f"👤 **Öğrenci:** `{row['student_id']}`")
-                        st.markdown(f"📚 **Ders/Konu:** {row['subject']} - **{row['topic']}** ({row['hata_sayisi']} Hata)")
-
-                        if st.button("⚡ Otomatik Ödev At", key=f"asgn_btn_{idx}"):
-                            create_automatic_assignment(
-                                student_id=row["student_id"],
-                                subject=row["subject"],
-                                topic=row["topic"],
-                                teacher_id=st.session_state.username
-                            )
-
-    # --- TAB 2: SINIF DÜZEYİ KNOWLEDGE GRAPH ---
-    with tab_t2:
-        st.subheader("🌐 Sınıf Geneli Müfredat & Kör Nokta Haritası")
-        st.caption("Kırmızı ve büyük düğümler sınıf genelinde yaşanan ortak kavramsal bariyerlerdir.")
-
-        nodes = [
-            Node(id="Dik Üçgen", label="Dik Üçgen / Eğim\nOrt: %88", size=20, color="#10B981"),
-            Node(id="Trigonometri", label="Trigonometri (ORTAK KÖR NOKTA)\nOrt: %42 | 14 Öğrenci Riskli", size=45, color="#EF4444"),
-            Node(id="Vektörler", label="Vektörler\nOrt: %61", size=28, color="#3B82F6"),
-            Node(id="Eğik Atış", label="Eğik Atış (Tıkanılan Hedef)\nOrt: %35 | 16 Öğrenci Riskli", size=50, color="#F97316")
-        ]
-        edges = [
-            Edge(source="Dik Üçgen", target="Trigonometri"),
-            Edge(source="Trigonometri", target="Vektörler"),
-            Edge(source="Vektörler", target="Eğik Atış")
-        ]
-        config = Config(width=750, height=450, directed=True, physics=True)
-
-        col_g, col_a = st.columns([5, 3])
-        with col_g:
-            agraph(nodes=nodes, edges=edges, config=config)
-
-        with col_a:
-            with st.container(border=True):
-                st.error("🚨 **Sınıf Genel Tıkanıklık Teşhisi**")
-                st.markdown("**Ortak Kör Nokta:** Trigonometri")
-                st.write("**Etkilenen Öğrenci:** 14 / 18 Öğrenci (%77)")
-                st.warning("Eğik Atış konusuna geçilmeden önce Trigonometri türetim adımları tekrar edilmelidir.")
-                if st.button("📢 Sınıfa Toplu Trigonometri Etüdü Tanımla"):
-                    st.toast("14 öğrencinin paneline etüt seti başarıyla gönderildi!")
-
-    # --- TAB 3: YENİ SORU EKLEME FORMU (SINIF BAZLI VE KOPYALA-YAPIŞTIR UYUMLU) ---
-    with tab_t3:
-        st.subheader("📋 Kopyala & Yapıştır ile Soru Ekle")
-        st.caption("Ders ve sınıf seviyesini seçip kopyaladığınız soru metinlerini doğrudan yapıştırabilirsiniz.")
-
-        with st.form("add_card_form", clear_on_submit=True):
-            col_d, col_g, col_t = st.columns([2, 2, 3])
-            
-            with col_d:
-                selected_subject = st.selectbox("Ders", ["Matematik", "Fizik", "Fen Bilgisi", "Geometri"])
-            
-            # Seçilen derse göre dinamik sınıf listesi
-            with col_g:
-                if selected_subject == "Matematik":
-                    grade_options = [f"{i}. Sınıf" for i in range(1, 13)]
-                elif selected_subject == "Fizik":
-                    grade_options = [f"{i}. Sınıf" for i in range(9, 13)]
-                elif selected_subject == "Fen Bilgisi":
-                    grade_options = [f"{i}. Sınıf" for i in range(5, 9)]
-                else:  # Geometri veya Diğer
-                    grade_options = [f"{i}. Sınıf" for i in range(9, 13)]
-                
-                selected_grade = st.selectbox("Sınıf Seviyesi", grade_options)
-
-            with col_t:
-                input_topic = st.text_input("Konu Adı", placeholder="Örn: Vektörler, Trigonometri, Bölünebilme...")
-
-            # Kopyala-Yapıştır Soru Metni Alanı
-            input_question = st.text_area(
-                "Soru Metni / Görsel Kökü (Kopyalayıp Yapıştırın)", 
-                placeholder="Soruyu başka bir belgeden kopyalayıp buraya yapıştırabilirsiniz...",
-                height=120
-            )
-
-            st.markdown("---")
-            st.markdown("**Cevap ve Çeldirici Şıklar:**")
-
-            input_correct = st.text_input("✅ Doğru Cevap (Kopyala-Yapıştır)", placeholder="Örn: 5")
-            
-            col_c1, col_c2, col_c3 = st.columns(3)
-            with col_c1:
-                input_d1 = st.text_input("❌ Çeldirici 1")
-            with col_c2:
-                input_d2 = st.text_input("❌ Çeldirici 2")
-            with col_c3:
-                input_d3 = st.text_input("❌ Çeldirici 3")
-
-            submit_btn = st.form_submit_button("💾 Soruyu Veritabanına Kaydet", use_container_width=True)
-
-            if submit_btn:
-                clean_question = input_question.strip() if input_question else ""
-                clean_correct = input_correct.strip() if input_correct else ""
-                clean_topic = input_topic.strip() if input_topic else ""
-
-                if clean_topic and clean_question and clean_correct:
-                    try:
-                        # Ders adını veritabanına "Fizik (11. Sınıf)" şeklinde birleştirerek yazar
-                        full_subject_name = f"{selected_subject} ({selected_grade})"
-                        
-                        payload = {
-                            "subject": full_subject_name,
-                            "topic": clean_topic,
-                            "term": clean_question,
-                            "definition": clean_correct,
-                            "distractor_1": input_d1.strip(),
-                            "distractor_2": input_d2.strip(),
-                            "distractor_3": input_d3.strip()
-                        }
-                        supabase.table("flashcards").insert(payload).execute()
-                        st.success(f"🎉 **{full_subject_name}** - '{clean_topic}' konusuna ait soru kaydedildi!")
-                    except Exception as e:
-                        st.error(f"Soru eklenirken hata oluştu: {e}")
-                else:
-                    st.warning("Lütfen Konu, Soru Metni ve Doğru Cevap alanlarını eksiksiz doldurun.")
-tab1, tab2, tab3, tab4 = st.tabs(
-    [
-        "⚠️ Takılınan Konular & Otomatik Ödevlendirme",
-        "🌐 Sınıf Düzeyi Knowledge Graph",
-        "➕ Yeni Soru / Flashcard Ekle",
-        "📚 Soru Deposu",  # <-- Yeni sekme burada tanımlanıyor
-    ]
-)
-# --- 4. SEKME: Soru Deposu ve Görüntüleme ---
-with tab4:
-  st.subheader("📚 Veritabanındaki Kayıtlı Soru Bankası")
-  st.markdown(
-      "Burada sisteme eklediğiniz tüm soruları görebilir, ders ve sınıf"
-      " düzeyine göre inceleyebilirsiniz."
+  st.info(
+      "💡 *İlkokul ve ortaokul için 4 şık (A-D), Lise kademeleri için 5 şık"
+      " (A-E) otomatik uygulanır.*"
   )
 
+# ---------------------------------------------------------
+# 4. ANA BAŞLIK
+# ---------------------------------------------------------
+st.title("📚 Şöhret Yelen Akademi | Öğretmen & İçerik Yönetim Paneli")
+st.markdown(
+    "Fizik, Matematik ve Fen Bilgisi pedagojik içerik, soru bankası ve dinamik"
+    " ödevlendirme sistemi."
+)
+st.markdown("---")
+
+# ---------------------------------------------------------
+# 5. MODÜLER SEKME (TAB) YAPISI
+# ---------------------------------------------------------
+tab1, tab2, tab3, tab4 = st.tabs([
+    "🎯 Kritik Kazanımlar & Ödevlendirme",
+    "🔗 Kavram Haritası, Konu Anlatımı & Medya",
+    "➕ Yeni Soru & Flashcard Ekle",
+    "📚 Soru Deposu & Arşiv",
+])
+
+# =========================================================
+# SEKME 1: KRİTİK KAZANIMLAR VE ÖDEVLENDİRME
+# =========================================================
+with tab1:
+  st.subheader("🎯 Kritik Kazanımlar ve Akıllı Ödevlendirme")
+  st.markdown(
+      "Öğrencilerin kavram yanılgılarını takip edin ve kademelere uygun"
+      " ödevler planlayın."
+  )
+
+  col_k1, col_k2 = st.columns(2)
+  with col_k1:
+    st.selectbox(
+        "Kazanım Analizi İçin Sınıf Seçin",
+        [
+            "İlkokul Matematik (1-4. Sınıf)",
+            "Ortaokul Matematik & Fen (5-8. Sınıf)",
+            "LGS Hazırlık (8. Sınıf Özel)",
+            "Lise Matematik (9-12. Sınıf)",
+            "Lise Fizik (9-12. Sınıf)",
+        ],
+    )
+  with col_k2:
+    st.selectbox(
+        "Zorluk Kademesi Hedefi", ["Tüm Seviyeler", "🟢 Kolay", "🟡 Orta", "🔴 Zor"]
+    )
+
+  st.info(
+      "📊 Henüz öğrenci analiz verisi girilmedi. Sorular eklendikçe dinamik"
+      " ödev havuzu burada listelenecektir."
+  )
+
+# =========================================================
+# SEKME 2: KAVRAM HARİTASI, KONU ANLATIMI VE MEDYA
+# =========================================================
+with tab2:
+  st.subheader("🔗 Kavram Haritası, Etkileşimli Konu Anlatımı & Medya")
+  st.markdown(
+      "Formül türetme adımları, görsel diyagramlar, animasyonlar ve GeoGebra"
+      " simülasyonları."
+  )
+
+  sub_tab_a, sub_tab_b, sub_tab_c = st.tabs(
+      ["📖 Konu Özeti & Formül Türetimi", "🖼️ Visual & GIF / MP4 Medya", "📐 GeoGebra / PhET Simülasyon"]
+  )
+
+  with sub_tab_a:
+    st.markdown("### 💡 Formül Nereden Geldi? (Derivasyon Odaklı Anlatım)")
+    st.write(
+        "Örnek Konu: **Newton'un 2. Hareket Yasası ($F = m \\cdot a$)**"
+    )
+    st.warning(
+        "**Kavram Yanılgısı:** Kuvvet, bir cismin sahip olduğu bir özellik"
+        " değildir; etkileşimin sonucudur!"
+    )
+    st.success(
+        "**Derivasyon:** Bir cisme uygulanan net kuvvet arttıkça ivme artar ($F"
+        " \\propto a$). Kütle arttıkça ivmelenmek zorlaşır ($a \\propto 1/m$)."
+        " Buradan $F = m \\cdot a$ bağıntısına ulaşılır."
+    )
+
+  with sub_tab_b:
+    st.markdown("### 🎬 Visual & Animasyon Gömme Alanı")
+    gorsel_url = st.text_input(
+        "Görsel veya GIF URL'si Gömdürün:",
+        placeholder="https://example.com/animasyon.gif",
+    )
+    if gorsel_url:
+      try:
+        st.image(
+            gorsel_url,
+            caption="Konu Anlatım Görseli / Animasyonu",
+            use_container_width=True,
+        )
+      except Exception as e:
+        st.error(f"Görsel yüklenemedi: {e}")
+    else:
+      st.info(
+          "Yukarıdaki alana resim (PNG/JPG) veya animasyon (GIF) linki girerek"
+          " anlatımlara görsel ekleyebilirsiniz."
+      )
+
+  with sub_tab_c:
+    st.markdown("### 📐 Canlı Etkileşimli GeoGebra / PhET Simülasyonu")
+    sim_embed_code = st.text_input(
+        "GeoGebra / PhET Embed (iframe) Linki:",
+        placeholder="https://www.geogebra.org/material/iframe/id/...",
+    )
+    if sim_embed_code:
+      components.iframe(sim_embed_code, height=500, scrolling=True)
+    else:
+      st.info(
+          "GeoGebra veya PhET simülasyon iframe bağlantısını buraya yapıştırarak"
+          " öğrencinin deneyimlemesini sağlayabilirsiniz."
+      )
+
+# =========================================================
+# SEKME 3: YENİ SORU / FLASHCARD EKLE
+# =========================================================
+with tab3:
+  st.subheader("➕ Yeni Soru & Flashcard Ekleme Paneli")
+  st.markdown(
+      "Seçilen sınıf seviyesine göre **şık sayısı (4 veya 5)** ve **zorluk"
+      " derecesi** otomatik ayarlanır."
+  )
+
+  with st.form("add_question_form", clear_on_submit=True):
+    c1, c2, c3 = st.columns([2, 2, 1])
+
+    with c1:
+      subject = st.selectbox(
+          "Ders Seçin", ["Fizik", "Matematik", "Fen Bilgisi"]
+      )
+      grade = st.selectbox(
+          "Sınıf Düzeyi",
+          [
+              "İlkokul / 1-4. Sınıf",
+              "Ortaokul / 5. Sınıf",
+              "Ortaokul / 6. Sınıf",
+              "Ortaokul / 7. Sınıf",
+              "Ortaokul / 8. Sınıf (LGS Hazırlık)",
+              "Lise / 9. Sınıf",
+              "Lise / 10. Sınıf",
+              "Lise / 11. Sınıf",
+              "Lise / 12. Sınıf (YKS)",
+          ],
+      )
+
+    with c2:
+      topic = st.text_input(
+          "Konu / Alt Kazanım", placeholder="Örn: Newton Yasaları / Kesirler"
+      )
+      question_type = st.selectbox(
+          "Soru Tipi",
+          [
+              "Kazanım Kavrama",
+              "Yeni Nesil / Beceri Temelli",
+              "LGS Çıkmış / Örnek Soru",
+              "ÖSYM / YKS Formatı",
+          ],
+      )
+
+    with c3:
+      difficulty = st.radio(
+          "Zorluk Derecesi", ["🟢 Kolay", "🟡 Orta", "🔴 Zor"]
+      )
+
+    st.markdown("---")
+    question_text = st.text_area(
+        "Soru Metni", placeholder="Sorunun detaylı metnini buraya yazın..."
+    )
+
+    image_url = st.text_input(
+        "Soru Görseli URL (Varsa)",
+        placeholder="https://... (Görselli soru ise resim bağlantısı)",
+    )
+
+    # DİNAMİK ŞIK SAYISI MANTIĞI: Lise seçildiyse 5 şık, diğerlerinde 4 şık
+    is_lise = "Lise" in grade
+    option_count = 5 if is_lise else 4
+    option_labels = ["A", "B", "C", "D", "E"][:option_count]
+
+    st.markdown(
+        f"**Seçenekler ({option_count} Şık - {'Lise Seviyesi' if is_lise else 'İlkokul/Ortaokul Seviyesi'}):**"
+    )
+
+    sc1, sc2 = st.columns(2)
+    with sc1:
+      opt_a = st.text_input("A Şıkkı Metni")
+      opt_b = st.text_input("B Şıkkı Metni")
+      opt_c = st.text_input("C Şıkkı Metni")
+    with sc2:
+      opt_d = st.text_input("D Şıkkı Metni")
+      opt_e = st.text_input("E Şıkkı Metni") if is_lise else ""
+
+    correct_answer = st.selectbox(
+        "🎯 Doğru Cevap Hangi Şık?",
+        option_labels,
+        format_func=lambda x: f"{x} Şıkkı",
+    )
+
+    st.markdown("---")
+    st.markdown("**Pedagojik Notlar & Tanımlar (İsteğe Bağlı):**")
+    tc1, tc2 = st.columns(2)
+    with tc1:
+      term = st.text_input(
+          "Önemli Terim / Kavram", placeholder="Örn: İvme / Sürtünme Kuvveti"
+      )
+      misconception = st.text_input(
+          "Olası Kavram Yanılgısı",
+          placeholder="Örn: Hız ile ivmeyi karıştırma",
+      )
+    with tc2:
+      definition = st.text_area(
+          "Terim Tanımı / Açıklaması",
+          placeholder="Kavramın mantıksal açıklaması...",
+      )
+
+    submit_btn = st.form_submit_button("💾 Soruyu Veritabanına Kaydet")
+
+    if submit_btn:
+      if question_text and topic and opt_a and opt_b:
+        try:
+          payload = {
+              "subject": subject,
+              "grade": grade,
+              "topic": topic,
+              "difficulty": difficulty,
+              "question_type": question_type,
+              "question_text": question_text,
+              "image_url": image_url if image_url else None,
+              "option_a": opt_a,
+              "option_b": opt_b,
+              "option_c": opt_c,
+              "option_d": opt_d,
+              "option_e": opt_e if is_lise else None,
+              "correct_answer": correct_answer,
+              "term": term if term else None,
+              "definition": definition if definition else None,
+              "misconception": misconception if misconception else None,
+          }
+          supabase.table("flashcards").insert(payload).execute()
+          st.success(
+              "Soru ve seçenekler başarıyla Supabase veritabanına kaydedildi!"
+              " 🎉"
+          )
+        except Exception as err:
+          st.error(f"Veritabanına kaydederken hata oluştu: {err}")
+      else:
+        st.warning(
+            "Lütfen Soru Metni, Konu ve en azından A ve B şıklarını doldurun."
+        )
+
+# =========================================================
+# SEKME 4: SORU DEPOSU VE ARŞİV
+# =========================================================
+with tab4:
+  st.subheader("📚 Soru Bankası & Dijital Arşiv")
+  st.markdown(
+      "Gelişmiş filtreleme alanıyla kayıtlı tüm soruları inceleyin ve arayın."
+  )
+
+  # Filtreleme Arayüzü
+  fc1, fc2, fc3 = st.columns(3)
+  with fc1:
+    filter_grade = st.selectbox(
+        "Sınıf Seviyesine Göre Filtrele",
+        ["Tümü", "İlkokul", "Ortaokul", "LGS", "Lise"],
+    )
+  with fc2:
+    filter_diff = st.selectbox(
+        "Zorluğa Göre Filtrele", ["Tümü", "🟢 Kolay", "🟡 Orta", "🔴 Zor"]
+    )
+  with fc3:
+    search_keyword = st.text_input(
+        "🔍 Kelime ile Arama Yap", placeholder="Metin veya konu yazın..."
+    )
+
+  st.markdown("---")
+
   try:
-    # Supabase'den flashcards tablosundaki tüm verileri çekiyoruz
     response = (
         supabase.table("flashcards").select("*").order("id", desc=True).execute()
     )
     questions = response.data
 
     if questions:
-      st.success(f"Veritabanında toplam **{len(questions)}** soru bulunuyor.")
+      # Filtreleme mantığı
+      filtered_list = []
+      for q in questions:
+        q_grade = str(q.get("grade") or "")
+        q_diff = str(q.get("difficulty") or "")
+        q_text = str(q.get("question_text") or "")
+        q_topic = str(q.get("topic") or "")
 
-      # Filtreleme için arama kutusu
-      search_term = st.text_input(
-          "🔍 Soru veya Konularda Ara:",
-          placeholder="Kelime yazın...",
-          key="search_question",
+        # Kademe filtresi
+        match_grade = (filter_grade == "Tümü") or (
+            filter_grade.lower() in q_grade.lower()
+        )
+        # Zorluk filtresi
+        match_diff = (filter_diff == "Tümü") or (filter_diff in q_diff)
+        # Kelime araması
+        sk = search_keyword.lower()
+        match_search = (
+            (sk == "") or (sk in q_text.lower()) or (sk in q_topic.lower())
+        )
+
+        if match_grade and match_diff and match_search:
+          filtered_list.append(q)
+
+      st.write(
+          f"Bulunan Soru Sayısı: **{len(filtered_list)}** / Total:"
+          f" **{len(questions)}**"
       )
 
-      for q in questions:
-        q_text = q.get("question_text", "")
-        q_topic = q.get("topic", "")
+      for item in filtered_list:
+        c_ans = item.get("correct_answer", "-")
+        diff_badge = item.get("difficulty", "🟢 Kolay")
 
-        # Arama filtresi mantığı
-        if (
-            search_term.lower() in q_text.lower()
-            or search_term.lower() in q_topic.lower()
+        with st.expander(
+            f"[{item.get('subject', 'Ders')}] {item.get('grade', 'Sınıf')} |"
+            f" Konu: {item.get('topic', '-')} ({diff_badge})"
         ):
-          with st.expander(
-              f"[{q.get('subject', 'Ders Yok')}]"
-              f" {q.get('grade', 'Sınıf Yok')} | Konu: {q_topic}"
-          ):
-            st.markdown(f"**Soru Metni:**\n{q_text}")
-            st.markdown(f"✅ **Doğru Cevap:** {q.get('correct_answer', '-')}")
+          st.markdown(f"**Zorluk:** {diff_badge}")
+          st.markdown(f"**Soru Metni:**\n{item.get('question_text')}")
 
-            col1, col2, col3 = st.columns(3)
-            with col1:
-              st.caption(f"Çeldirici 1: {q.get('distractor_1', '-')}")
-            with col2:
-              st.caption(f"Çeldirici 2: {q.get('distractor_2', '-')}")
-            with col3:
-              st.caption(f"Çeldirici 3: {q.get('distractor_3', '-')}")
+          # Varsa Soru Görseli
+          img_link = item.get("image_url")
+          if img_link:
+            st.image(
+                img_link, caption="Soru Görseli", use_container_width=False
+            )
 
-            if q.get("term") or q.get("definition"):
-              st.info(
-                  f"**Terim:** {q.get('term', '-')} | **Tanım:**"
-                  f" {q.get('definition', '-')}"
-              )
+          st.markdown("---")
+          st.markdown("**Şıklar:**")
+
+          st.markdown(
+              f"- **A)** {item.get('option_a', '-')}"
+              + (" ✅" if c_ans == "A" else "")
+          )
+          st.markdown(
+              f"- **B)** {item.get('option_b', '-')}"
+              + (" ✅" if c_ans == "B" else "")
+          )
+          st.markdown(
+              f"- **C)** {item.get('option_c', '-')}"
+              + (" ✅" if c_ans == "C" else "")
+          )
+          st.markdown(
+              f"- **D)** {item.get('option_d', '-')}"
+              + (" ✅" if c_ans == "D" else "")
+          )
+
+          opt_e_val = item.get("option_e")
+          if opt_e_val:
+            st.markdown(
+                f"- **E)** {opt_e_val}" + (" ✅" if c_ans == "E" else "")
+            )
+
+          st.markdown(f"\n🎯 **Doğru Cevap:** **{c_ans} Şıkkı**")
+
+          # Pedagojik Detaylar
+          term_val = item.get("term")
+          def_val = item.get("definition")
+          misc_val = item.get("misconception")
+
+          if term_val or def_val or misc_val:
+            st.info(
+                f"📌 **Kavram:** {term_val or '-'} \n\n"
+                f"📖 **Açıklama:** {def_val or '-'} \n\n"
+                f"⚠️ **Kavram Yanılgısı Notu:** {misc_val or '-'}"
+            )
     else:
       st.info(
-          "Henüz veritabanına kaydedilmiş bir soru bulunmuyor. 'Yeni Soru /"
-          " Flashcard Ekle' sekmesinden soru ekleyebilirsiniz."
+          "Henüz veritabanına kayıtlı bir soru bulunmamaktadır. 'Yeni Soru"
+          " Ekle' sekmesinden ekleyebilirsiniz."
       )
 
   except Exception as e:
-    st.error(f"Sorular yüklenirken bir bağlantı hatası oluştu: {e}")
-      
+    st.error(f"Soru deposu yüklenirken bir hata oluştu: {e}")
